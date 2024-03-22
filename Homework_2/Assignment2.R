@@ -1,5 +1,5 @@
-#File: EMM_Assignment1.R
-#Project: Assignment 1 for Econometrics Methods (Inference & Bootstrap)
+#File: EMM_Assignment2.R
+#Project: Assignment 2 for Econometrics Methods (Inference & Bootstrap)
 #Author: Bingxue Li
 #Date: 2024-02-03
 
