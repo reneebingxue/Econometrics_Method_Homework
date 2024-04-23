@@ -1,0 +1,594 @@
+#File: EMM_Final_Project.R
+#Project: Final_Project: Boundary Issue with ARCH model
+#Author: Bingxue Li, Cong Minh Nguyen
+#Date: 2024-03-23
+# Setup -------------------------------------------------------------------
+### CLEAN UP MY ENVIRONMENT
+cat("\014")
+library(numDeriv) 	# loads the functions grad and hessian which numerically evaluate the gradient and hessian
+library(tictoc)
+library(numDeriv)
+library(xtable)
+library(reshape2)
+library(ggplot2)
+library('Rsolnp') # Optimisation with constraint
+rm(list=ls()) 		# Clear workspace
+set.seed(1) 		# Set seed for random number generator
+# My working directory
+setwd('...')
+source("DGP.R")
+source("ARCH_LL.R")
+source("ARCH_LL_constrained.R")
+source("datafunction_boot.R")
+source("score_gradient.R")
+source("DGP.R")
+source("J_1.R")
+source("onestep_est.R")
+source("J_hessian.R")
+load("cv_value.RData")
+###########################################
+# Part.I: Data Generating Process for RCP #
+###########################################
+n <- 1000  # sample size
+num <- 1000 # iterations
+alpha1 <- 0.2 # ARCH(1) parameter
+alpha2 <- 0.2 # ARCH(2) parameter
+omega <- 1  # constant term parameter
+theta <- c(alpha1, alpha2, omega)
+k=length(theta)                      # Dimension of parameter space
+theta_hat_vec = matrix(0,num,k)
+epsilon = 0.1
+inside_N_ML = rep(0,num)
+J_2_sum = matrix(rep(0,9),3)
+
+###########################################
+# Part.II: Maximum Likelihood Estimation  #
+###########################################
+# 1000 Simulations of MLE
+for (it in 1:num) {
+
+  # Data Generating Process
+  X <- simulate_arch2(n, theta)$X
+
+  result <- solnp(pars = c(0.5,0.5,0.5), 
+                  fun = log_likelihood_arch2, 
+                  LB = c(0,0,0), 
+                  UB = c(Inf,Inf,Inf),
+                  control = c(delta= 1e-9, tol= 1e-7, trace=0))
+  theta_hat_MLE = result$par
+  theta_hat_vec[it,1:k] = theta_hat_MLE
+
+  # Consistency Performance
+  if (sqrt(sum((theta_hat_MLE - theta)^2)) < epsilon) {
+    inside_N_ML[it] = 1
+  }
+
+  # Variance
+  J_2_sum = J_2_sum + solve(result$hessian)
+
+}
+colMeans(theta_hat_vec)
+var(theta_hat_vec)
+mean(inside_N_ML)
+J_2_sum/num
+hist(theta_hat_vec[,1])
+hist(theta_hat_vec[,2])
+hist(theta_hat_vec[,3])
+# > colMeans(theta_hat_vec)
+# [1] 0.1976790 0.1963107 1.0075691
+# > mean(inside_N_ML)
+# [1] 0.627
+
+##############################
+# Part.III: Trinity of Test  #
+##############################
+# Quality Check for the Test: Assume Boundary Issue Away
+# HT Settings ------------------------------------------------------------------
+# Throughout this project, we fix H_0: Alpha20=0.
+alpha2_null= 0  # Fix Null Hypothesis
+alpha2 <- 0.2   # ARCH(2) parameter
+# Setting: Fix Parameter Alpha2n=Alpha20=0.
+# Investigate the Asymptotic Distribution of Test Statistics Under Null (Under Alternative: Change Alpha2n).
+# Investigate the Size of the Test (Rejection freq of H_0 under Alpha2n=0).
+n <- 1000  # sample size
+alpha1 <- 0.2  # ARCH(1) parameter
+omega <- 1     # constant term parameter
+theta <- c(alpha1, alpha2, omega)# Parameter Vector
+theta_hat_vec = matrix(0,num,k)  # Nonrestricted MLE outcomes
+theta_hat0_vec = matrix(0,num,k) # Restricted MLE outcomes
+Wald_vec = matrix(0,num,1)       # Initialize Matrix Wald Statistics
+Score_vec = matrix(0,num,1)      # Initialize Matrix Score Statistics
+LR_vec = matrix(0,num,1)         # Initialize Matrix LR Statistics
+reject_Wald = matrix(0,num,1)   # Initialize Matrix HT outcomes
+reject_Score = matrix(0,num,1)  # Initialize Matrix HT outcomes
+reject_LR = matrix(0,num,1)     # Initialize Matrix HT outcomes
+# Naive Asymptotic CV for Tests    (No parameter space constraint)
+cvn <- qchisq(.95, df=1) 
+
+# chi_squared_1 <- rchisq(10000000, df = 1)
+# constant_0 <- rep(0, length(chi_squared_1))
+# half_length <- length(chi_squared_1) / 2
+# mixed_sequence <- c(chi_squared_1[1:half_length], constant_0[(half_length + 1):length(constant_0)])
+# hist(mixed_sequence, breaks = 100, main = "Mixed Sequence Histogram")
+# cv <- quantile(mixed_sequence, probs = 0.95)
+
+# > print(cv)
+# [1] 2.705521
+# > print(cvn)
+# [1] 3.841459
+# # Histogram of Test Statistic Distribution--------------------------------------
+# par(mfrow = c(2, 2))
+# hist(Wald_vec, main = "Histogram of Simulated Wald Statistics")
+# hist(Score_vec, main = "Histogram of Simulated Score Statistics")
+# hist(LR_vec, main = "Histogram of Simulated LR Statistics")
+# png("Distribution of Test Statistics Under Null.png")
+# # Reset the layout to default
+# par(mfrow = c(1, 1))
+
+# Using cvn: Two-sided Test
+# > mean(reject_Wald)
+# [1] 0.054
+# > mean(reject_Score)
+# [1] 0.054
+# > mean(reject_LR)
+# [1] 0.045
+
+# Using cv: One-sided Test 
+# > mean(reject_Wald)
+# [1] 0.09
+# > mean(reject_Score)
+# [1] 0.099
+# > mean(reject_LR)
+# [1] 0.089
+
+# Takeaway: Assuming boundary issue away, the size is well-controlled for alpha2=0.2. 
+# Test statistics programmed properly.
+
+#######################################################
+# Part.IV: TABLE OF SIZE OF TESTS: Alpha2n, Alpha20=0 #
+#######################################################
+alpha2_null= 0  # Fix Null Hypothesis
+# Setting: Fix Parameter Alpha2n=Alpha20=0.
+# Investigate the Asymptotic Distribution of Test Statistics Under Null (Under Alternative: Change Alpha2n).
+# Investigate the Size of the Test (Rejection freq of H_0 under Alpha2n=0).
+n <- 10000  # sample size
+alpha1 <- 0  # ARCH(1) parameter
+alpha2 <- 0  # ARCH(2) parameter
+omega <- 1     # constant term parameter
+theta <- c(alpha1, alpha2, omega)# Parameter Vector
+theta_hat_vec = matrix(0,num,k)  # Nonrestricted MLE outcomes
+theta_hat0_vec = matrix(0,num,k) # Restricted MLE outcomes
+Wald_vec = matrix(0,num,1)       # Initialize Matrix Wald Statistics
+Score_vec = matrix(0,num,1)      # Initialize Matrix Score Statistics
+LR_vec = matrix(0,num,1)         # Initialize Matrix LR Statistics
+reject_Wald = matrix(0,num,1)   # Initialize Matrix HT outcomes
+reject_Score = matrix(0,num,1)  # Initialize Matrix HT outcomes
+reject_LR = matrix(0,num,1)     # Initialize Matrix HT outcomes
+# Monte Carlo Simulation -------------------------------------------------------
+for (it in 1:num) {
+  # DGP
+  X <- simulate_arch2(n, theta)$X
+  T=length(X)
+  # Estimation
+  result <- solnp(pars = c(0.5,0.5,0.5), 
+                  fun = log_likelihood_arch2, 
+                  LB = c(0,0,0), 
+                  UB = c(Inf,Inf,Inf),
+                  control = c(delta= 1e-9, tol= 1e-7, trace=0))
+  theta_hat_MLE = result$par
+  theta_hat_vec[it,1:k] = theta_hat_MLE
+  
+  # Estimation: Constrained 
+  result_constrained <-  solnp(pars =  c(0.5, 0.5), 
+                               fun = log_likelihood_arch2_constrained,
+                               LB = c(0, 0), 
+                               UB = c(Inf, Inf),
+                               control = c(delta= 1e-9, tol= 1e-7, trace=0))
+  theta_hat_MLE_constrained = c(result_constrained$par[1],alpha2_null,result_constrained$par[2])  
+  theta_hat0_vec[it,1:k] = theta_hat_MLE_constrained
+  
+  # 1. WALD TEST
+  temp = theta_hat_MLE[2] - alpha2_null
+  hessian <- J_hessian(theta_hat_MLE)
+  V_hat <- -solve(hessian)/n
+  Wald =  t(temp)%*%solve(V_hat[2,2])%*%temp
+  Wald_vec[it] = Wald
+  if (is.nan(Wald) == 0) {
+    if (Wald > cv) {
+      reject_Wald[it] = 1
+    }
+  }
+  
+  # 2. Score (Only the constrained)
+  score = score_gradient(theta_hat_MLE_constrained)
+  V_hat_constrained <- J_1(theta_hat_MLE_constrained)
+  Score = (T-2)*score%*%solve(V_hat_constrained)%*%t(score)
+  Score_vec[it] = Score
+  if (is.nan(Score) == 0) {
+    if (Score > cv) {
+      reject_Score[it] = 1
+    }
+  }
+  
+  # 3. LR TEST
+  LR = -2*(log_likelihood_arch2(theta_hat_MLE) - log_likelihood_arch2(theta_hat_MLE_constrained))
+  LR_vec[it] = LR
+  if (is.nan(LR) == 0) {
+    if (LR > cv) {
+      reject_LR[it] = 1
+    }
+  }
+}
+
+# Size of the Test: Under Alpha3n=Alpha30=0, using cv
+s_wald_cv <- mean(reject_Wald)
+s_score_cv <- mean(reject_Score)
+s_LR_cv <- mean(reject_LR)
+# Size of the Test: Under Alpha3n=Alpha30=0, using cvn
+count <- sum(Wald_vec > cvn)
+s_wald_cvn <- count
+count <- sum(Score_vec > cvn)
+s_score_cvn <- count
+count <- sum(LR_vec > cvn)
+s_LR_cvn <- count
+# Histogram of Test Statistic Distribution--------------------------------------
+par(mfrow = c(2, 2))
+hist(Wald_vec, main = "Histogram of Simulated Wald Statistics")
+hist(Score_vec, main = "Histogram of Simulated Score Statistics")
+hist(LR_vec, main = "Histogram of Simulated LR Statistics")
+# chi_squared_1 <- rchisq(10000000, df = 1)
+# constant_0 <- rep(0, length(chi_squared_1))
+# half_length <- length(chi_squared_1) / 2
+# mixed_sequence <- c(chi_squared_1[1:half_length], constant_0[(half_length + 1):length(constant_0)])
+hist(mixed_sequence, breaks = 100, main = "Mixed Sequence Histogram")
+par(mfrow = c(1, 1))
+
+# Use cv: Correct one-sided, but Wald and Score fail
+# > mean(reject_Wald)
+# [1] 0.044
+# > mean(reject_Score)
+# [1] 0.105
+# > mean(reject_LR)
+# [1] 0.046
+
+# Use cvn: Wrong two-sided, Too conservative
+# Size of the Test: Under Alpha2n=Alpha20=0 (or 0.2) sample size: 100000
+# > mean(reject_Wald)
+# [1] 0.022
+# > mean(reject_Score)
+# [1] 0.049
+# > mean(reject_LR)
+# [1] 0.024
+
+##############################
+# Part.V: One-step Estimator #
+##############################
+alpha2_null= 0  # Fix Null Hypothesis
+# Setting: Fix Parameter Alpha2n=Alpha20=0.
+# Investigate the Asymptotic Distribution of Test Statistics Under Null (Under Alternative: Change Alpha2n).
+# Investigate the Size of the Test (Rejection freq of H_0 under Alpha2n=0).
+n <- 1002  # sample size
+alpha1 <- 0.2  # ARCH(1) parameter
+alpha2 <- 0.05  # ARCH(2) parameter
+omega <- 1     # constant term parameter
+theta <- c(alpha1, alpha2, omega)# Parameter Vector
+theta_hat_vec = matrix(0,num,k)  # Nonrestricted MLE outcomes
+theta_ost_vec = matrix(0,num,k)
+Wald_vec = matrix(0,num,1)       # Initialize Matrix Wald Statistics
+t_vec = matrix(0,num,1)
+reject_Wald = matrix(0,num,1)   # Initialize Matrix HT outcomes
+reject_t = matrix(0,num,1)
+cvt <- qnorm(0.975)
+# 1000 Simulations of MLE
+for (it in 1:num) {
+  
+  # Data Generating Process
+  X <- simulate_arch2(n, theta)$X
+  T<-length(X)
+  
+  # Estimation
+  result <- solnp(pars = c(0.5,0.5,0.5), 
+                  fun = log_likelihood_arch2, 
+                  LB = c(0,0,0), 
+                  UB = c(Inf,Inf,Inf),
+                  control = c(delta= 1e-9, tol= 1e-7, trace=0))
+  theta_hat_MLE = result$par
+  theta_hat_vec[it,1:k] = theta_hat_MLE
+  
+  # One_step Estimation
+  hessian <- J_hessian(theta_hat_MLE)
+  theta_ost <- onestep_est(theta_hat_MLE)
+  theta_ost_vec[it,1:k] = theta_ost
+  
+  # 1. WALD TEST
+  temp = theta_ost[2] - alpha2_null
+  #hessian <- result$hessian
+  hessian <- J_hessian(theta_ost)
+  V_hat <- -solve(hessian)/(T-2)
+  Wald = t(temp)%*%solve(V_hat[2,2])%*%temp
+  Wald_vec[it] = Wald
+  if (is.nan(Wald) == 0) {
+    if (Wald > cvn) {
+      reject_Wald[it] = 1
+    }
+  }
+  
+  # 2. T TEST
+  var <- pseudoinverse(J_1(theta_ost))
+  t = sqrt(T-2)*(temp/sqrt(var[2,2]))
+  t_vec[it] =t
+  if (is.nan(t) == 0) {
+    if (t > cvt) {
+      reject_t[it] = 1
+    }
+  }
+}
+mean(reject_Wald)
+mean(reject_t)
+par(mfrow = c(2, 3))
+hist(theta_hat_vec[,1], main="MLE of Alpha 1")
+hist(theta_hat_vec[,2], main="MLE of Alpha 2")
+hist(theta_hat_vec[,3], main="MLE of Omega")
+hist(theta_ost_vec[,1], main="One-step Estimator of Alpha 1")
+hist(theta_ost_vec[,2], main="One-step Estimator of Alpha 1")
+hist(theta_ost_vec[,3], main="One-step Estimator of Alpha 1")
+par(mfrow = c(2, 2))
+hist(Wald_vec)
+hist(t_vec)
+
+
+#######################################################
+# Part.VI: PLOT OF POWER FUNCTION: Alpha2n=0 to 0.1  #
+#######################################################
+# Plot Null Rejection Frequency for Trinity of Test for the Following Settings.
+# Setting1: Fix Alpha20=0, Fix Sample Size n=300, Alternate Alpha2n=0 to 0.1.  
+# Setting2: Fix Alpha20=0, Fix Small Alpha2n=0.01, Alternate Sample Size n=50,150,300,1000.  
+Wald_one_vec = matrix(0,num,1)  
+# Setting1----------------------------------------------------------------------
+#Fix Sample Size n=300.
+n = 152
+#Fix Alpha20=0. 
+alpha2_null=0
+# Alternate Alpha2n=0 to 0.1. 
+alpha2n_values <- c(0,0.05,0.1,0.15,0.2,0.3,0.4,0.5) 
+alpha1 <- 0.2
+omega <-1
+# Initialize the Matrix for Rejection (iteration * alpha_2n grid)
+reject_Wald <- matrix(0, num, length(alpha2n_values))
+reject_Score <- matrix(0, num, length(alpha2n_values))
+reject_LR <- matrix(0, num, length(alpha2n_values))
+reject_Wald_one <- matrix(0, num, length(alpha2n_values))
+# Loop over Alpha2n=0 to 0.1.  
+for (alpha2_idx in seq_along(alpha2n_values)) {
+  
+  # Update the true parameter vector
+  alpha2 <- alpha2n_values[alpha2_idx]
+  cat('\nalpha2 true is', alpha2)
+  theta <- c(alpha1, alpha2, omega)
+  
+  # MONTE CARLO SIMULATION
+  for (it in 1:num) {
+    # Data generating process
+    X <- simulate_arch2(n, theta)$X
+    T=length(X)
+    
+    # Estimation
+    result <- solnp(pars = c(0.5,0.5,0.5), 
+                    fun = log_likelihood_arch2, 
+                    LB = c(0,0,0), 
+                    UB = c(Inf,Inf,Inf),
+                    control = c(delta= 1e-9, tol= 1e-7, trace=0))
+    theta_hat_MLE = result$par
+    theta_hat_vec[it,1:k] = theta_hat_MLE
+    
+    # Estimation: Constrained 
+    result_constrained <-  solnp(pars =  c(0.5, 0.5), 
+                                 fun = log_likelihood_arch2_constrained,
+                                 LB = c(0, 0), 
+                                 UB = c(Inf, Inf),
+                                 control = c(delta= 1e-9, tol= 1e-7, trace=0))
+    theta_hat_MLE_constrained = c(result_constrained$par[1],alpha2_null,result_constrained$par[2])  
+    theta_hat0_vec[it,1:k] = theta_hat_MLE_constrained
+    
+    # Estimation: One-step
+    hessian <- J_hessian(theta_hat_MLE)
+    theta_ost <- onestep_est(theta_hat_MLE)
+    theta_ost_vec[it,1:k] = theta_ost
+
+    # 1. WALD TEST
+    temp = theta_hat_MLE[2] - alpha2_null
+    hessian <- J_hessian(theta_hat_MLE)
+    V_hat <- -solve(hessian)/n
+    Wald =  t(temp)%*%solve(V_hat[2,2])%*%temp
+    Wald_vec[it] = Wald
+    if (is.nan(Wald) == 0) {
+      if (Wald > cv) {
+        reject_Wald[it, alpha2_idx] = 1
+      }
+    }
+    
+    # 2. Score (Only the constrained)
+    score = score_gradient(theta_hat_MLE_constrained)
+    V_hat_constrained <- J_1(theta_hat_MLE_constrained)
+    Score = (T-2)*score%*%solve(V_hat_constrained)%*%t(score)
+    Score_vec[it] = Score
+    if (is.nan(Score) == 0) {
+      if (Score > cvn) {
+        reject_Score[it, alpha2_idx] = 1
+      }
+    }
+    
+    # 3. LR TEST
+    LR = -2*(log_likelihood_arch2(theta_hat_MLE) - log_likelihood_arch2(theta_hat_MLE_constrained))
+    LR_vec[it] = LR
+    if (is.nan(LR) == 0) {
+      if (LR > cv) {
+        reject_LR[it, alpha2_idx] = 1
+      }
+    }
+    
+    # 4. Wald TEST (One-step Estimator)
+    temp = theta_ost[2] - alpha2_null
+    #hessian <- result$hessian
+    hessian <- J_hessian(theta_ost)
+    V_hat <- - solve(hessian)/n
+    Wald_one = t(temp)%*%solve(V_hat[2,2])%*%temp
+    Wald_one_vec[it] = Wald
+    if (is.nan(Wald_one) == 0) {
+      if (Wald_one > cvn) {
+        reject_Wald_one[it, alpha2_idx] = 1
+      }
+    }
+  }
+}
+
+# Results
+mean_reject_Wald <- colMeans(reject_Wald)
+mean_reject_Score <- colMeans(reject_Score)
+mean_reject_LR <- colMeans(reject_LR)
+mean_reject_Wald_one <- colMeans(reject_Wald_one)
+
+# Prepare data for plotting
+plot_data <- data.frame(alpha2_true = alpha2n_values, 
+                        mean_reject_Score = mean_reject_Score, 
+                        mean_reject_Wald = mean_reject_Wald, 
+                        mean_reject_LR = mean_reject_LR,
+                        mean_reject_Wald_one = mean_reject_Wald_one)
+plot_data <- melt(plot_data, id.vars = "alpha2_true", variable.name = "Test", value.name = "Mean_Reject")
+plot_data$Test <- gsub(".*mean_reject_", "",plot_data$Test)
+
+# Plotting
+ggplot(plot_data, aes(x = alpha2_true, y = Mean_Reject, color = Test)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "True Alpha 2", y = "Rejection Frequency", color = "Test") +
+  ggtitle("H0: Alpha 2 = 0") +
+  theme_minimal()+
+  annotate("text", x = Inf, y = Inf, 
+           label = "Sample Size T = 150, alpha 1 = 0.2", color = "black", hjust = 1, vjust = 1)
+
+ggsave("rejection_frequencies_n300 (alpha2_0<0.1).pdf", width = 8, height = 6)
+
+# Setting2----------------------------------------------------------------------
+# Fix Small Alpha2n=0.01
+alpha2=0.01
+alpha1=0.2
+theta=c(alpha1,alpha2,omega)
+# Fix Alpha20=0
+alpha2_null=0
+# Alternate Sample Size n=50,150,300,1000.  
+sample_size <- c(50,150,300,600,1000)
+# Initialize the Matrix for Rejection (iteration * sample_size grid)
+reject_Wald <- matrix(0, num, length(sample_size))
+reject_Score <- matrix(0, num, length(sample_size))
+reject_LR <- matrix(0, num, length(sample_size))
+reject_Wald_one <- matrix(0, num, length(sample_size))
+# Loop over Sample Size n=50,150,300,1000.
+for (ssize_idx in seq_along(sample_size)) {
+  
+  # Update the true parameter vector
+  n <- sample_size[ssize_idx]
+  cat('\nsample size is', n)
+  
+  # MONTE CARLO SIMULATION
+  for (it in 1:num) {
+    # Data generating process
+    X <- simulate_arch2(n, theta)$X
+    T=length(X)
+    
+    # Estimation
+    result <- solnp(pars = c(0.5,0.5,0.5), 
+                    fun = log_likelihood_arch2, 
+                    LB = c(0,0,0), 
+                    UB = c(Inf,Inf,Inf),
+                    control = c(delta= 1e-9, tol= 1e-7, trace=0))
+    theta_hat_MLE = result$par
+    theta_hat_vec[it,1:k] = theta_hat_MLE
+    
+    # Estimation: Constrained 
+    result_constrained <-  solnp(pars =  c(0.5, 0.5), 
+                                 fun = log_likelihood_arch2_constrained,
+                                 LB = c(0, 0), 
+                                 UB = c(Inf, Inf),
+                                 control = c(delta= 1e-9, tol= 1e-7, trace=0))
+    theta_hat_MLE_constrained = c(result_constrained$par[1],alpha2_null,result_constrained$par[2])  
+    theta_hat0_vec[it,1:k] = theta_hat_MLE_constrained
+    
+    # Estimation: One-step
+    hessian <- J_hessian(theta_hat_MLE)
+    theta_ost <- onestep_est(theta_hat_MLE)
+    theta_ost_vec[it,1:k] = theta_ost
+    
+    # 1. WALD TEST
+    temp = theta_hat_MLE[2] - alpha2_null
+    hessian <- J_hessian(theta_hat_MLE)
+    V_hat <- -solve(hessian)/n
+    Wald =  t(temp)%*%solve(V_hat[2,2])%*%temp
+    Wald_vec[it] = Wald
+    if (is.nan(Wald) == 0) {
+      if (Wald > cv) {
+        reject_Wald[it, ssize_idx] = 1
+      }
+    }
+    
+    # 2. Score (Only the constrained)
+    score = score_gradient(theta_hat_MLE_constrained)
+    V_hat_constrained <- J_1(theta_hat_MLE_constrained)
+    Score = (T-2)*score%*%solve(V_hat_constrained)%*%t(score)
+    Score_vec[it] = Score
+    if (is.nan(Score) == 0) {
+      if (Score > cvn) {
+        reject_Score[it, ssize_idx] = 1
+      }
+    }
+    
+    # 3. LR TEST
+    LR = -2*(log_likelihood_arch2(theta_hat_MLE) - log_likelihood_arch2(theta_hat_MLE_constrained))
+    LR_vec[it] = LR
+    if (is.nan(LR) == 0) {
+      if (LR > cv) {
+        reject_LR[it, ssize_idx] = 1
+      }
+    }
+    
+    # 4. Wald TEST (One-step Estimator)
+    temp = theta_ost[2] - alpha2_null
+    #hessian <- result$hessian
+    hessian <- J_hessian(theta_ost)
+    V_hat <- - solve(hessian)/n
+    Wald_one = t(temp)%*%solve(V_hat[2,2])%*%temp
+    Wald_one_vec[it] = Wald
+    if (is.nan(Wald_one) == 0) {
+      if (Wald_one > cvn) {
+        reject_Wald_one[it, ssize_idx] = 1}
+    }
+  }
+}
+# Results
+mean_reject_Wald <- colMeans(reject_Wald)
+mean_reject_Score <- colMeans(reject_Score)
+mean_reject_LR <- colMeans(reject_LR)
+mean_reject_Wald_one <- colMeans(reject_Wald_one)
+
+# Prepare data for plotting
+plot_data <- data.frame(sample_size = sample_size, 
+                        mean_reject_Score = mean_reject_Score, 
+                        mean_reject_Wald = mean_reject_Wald, 
+                        mean_reject_LR = mean_reject_LR,
+                        mean_reject_Wald_one = mean_reject_Wald_one)
+plot_data <- melt(plot_data, id.vars = "sample_size", variable.name = "Test", value.name = "Mean_Reject")
+plot_data$Test <- gsub(".*mean_reject_", "",plot_data$Test)
+
+# Plotting
+ggplot(plot_data, aes(x = sample_size, y = Mean_Reject, color = Test)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Sample Size (T)", y = "Rejection Frequency", color = "Test") +
+  ggtitle("H0: Alpha 2 = 0") +
+  theme_minimal()+
+  annotate("text", x = Inf, y = Inf, 
+           label = "True Alpha 2 = 0.01, Alpha 1 = 0.2", color = "black", hjust = 1, vjust = 1)
+
+ggsave("rejection_frequencies_Ns (alpha2_0=0).pdf", width = 8, height = 6)
+
+toc()
